@@ -11,7 +11,7 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
 	<flow name="sales-digest-scheduler-flow" doc:id="327593f8-0bbf-492e-8cdf-166e98bb0ab4" >
 		<scheduler doc:name="Scheduler" doc:id="63bc1016-4b7e-42b4-b464-85f8feca8662" >
 			<scheduling-strategy >
-				<fixed-frequency frequency="${scheduler.frequency}" timeUnit="HOURS" />
+				<fixed-frequency frequency="${scheduler.frequency}" timeUnit="SECONDS" />
 			</scheduling-strategy>
 		</scheduler>
 		<logger level="INFO" doc:name="Log run start" doc:id="9b43fb6f-c55b-4b67-b601-1f0c72869a00" message="Sales digest run started" />
