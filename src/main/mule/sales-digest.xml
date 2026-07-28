@@ -1,5 +1,152 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd"></mule>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<flow name="sales-digest-scheduler-flow" doc:id="327593f8-0bbf-492e-8cdf-166e98bb0ab4" >
+		<scheduler doc:name="Scheduler" doc:id="63bc1016-4b7e-42b4-b464-85f8feca8662" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="${scheduler.frequency}" timeUnit="SECONDS" />
+			</scheduling-strategy>
+		</scheduler>
+		<logger level="INFO" doc:name="Log run start" doc:id="9b43fb6f-c55b-4b67-b601-1f0c72869a00" message="Sales digest run started" />
+		<file:read doc:name="Read sales.csv" doc:id="16a81133-ca02-48f2-a195-b6f5ccc3b12b" config-ref="File_Config" path="${file.name}" outputMimeType="application/csv; header=true" />
+		<flow-ref doc:name="Process batch" doc:id="7a5c10e6-2a94-45e8-b53d-ac5f384be58c" name="process-sales-batch-flow" />
+	</flow>
+	<flow name="process-sales-batch-flow" doc:id="b1ee05e3-bdeb-414d-972d-dc6556f6afae" >
+		<ee:transform doc:name="Validate rows" doc:id="1e6b48d6-ecdb-49c0-b188-1092bc676638" >
+			<ee:variables >
+				<ee:set-variable variableName="rowsRead" ><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(payload default [])]]></ee:set-variable>
+				<ee:set-variable variableName="rows" ><![CDATA[%dw 2.0
+output application/java
+fun isValidRow(row) =
+    (trim(row.sale_id default "") != "") and
+    (trim(row.sale_date default "") matches /^\d{4}-\d{2}-\d{2}.*/) and
+    (trim(row.country_code default "") matches /^[A-Za-z]{2}$/) and
+    (trim(row.currency default "") matches /^[A-Za-z]{3}$/) and
+    (trim(row.amount_local default "") matches /^\d+(\.\d+)?$/) and
+    ((trim(row.amount_local default "0") as Number default 0) > 0)
+---
+(payload default [])
+    filter isValidRow($)
+    map ($ ++ {
+        country_code: upper(trim($.country_code)),
+        currency: upper(trim($.currency)),
+        amount_local: trim($.amount_local),
+        sale_date: trim($.sale_date)
+    })]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<os:retrieve key="countryLookup" objectStore="Country_Cache_OS" target="countryLookup" doc:name="Try country cache">
+			<os:default-value><![CDATA[#[{}]]]></os:default-value>
+		</os:retrieve>
+		<choice doc:name="Country cache miss?">
+			<when expression="#[isEmpty(vars.countryLookup)]">
+				<flow-ref doc:name="country-data-pagination-sub-flow" doc:id="3dd892f2-8b37-4560-820c-dbc82886aaa1" name="country-data-pagination-sub-flow" />
+			</when>
+		</choice>
+		<choice doc:name="Any non-EUR sales?" doc:id="28f94841-3c22-4915-8ebe-c8e19a009536" >
+			<when expression='#[not isEmpty(((vars.rows map $.currency) filter ($ != "EUR")))]' >
+				<until-successful maxRetries="${http.retry.count}" doc:name="Retry with backoff" doc:id="834533e8-3f9c-4dc6-98f9-a186d42ecb72" millisBetweenRetries="${http.retry.delayMs}" >
+					<http:request method="GET" doc:name="GET FX rate" doc:id="112ae85e-7ac4-4c52-b6e8-17a99413174d" config-ref="Frankfurter_HTTP_Request_configuration" path="${frankfurter.path}" responseTimeout="${http.response.timeout}" >
+						<http:query-params ><![CDATA[#[{
+							from: "EUR",
+							to: (((vars.rows map $.currency) distinctBy $) filter ($ != "EUR")) joinBy ","
+						}]]]></http:query-params>
+					</http:request>
+				</until-successful>
+				<set-variable value="#[payload.rates default {}]" doc:name="EUR-based rates" doc:id="73d89fef-ca31-4547-888c-d56c374b7e4c" variableName="fxRates" />
+			</when>
+			<otherwise >
+				<set-variable value="#[{}]" doc:name="No FX needed" doc:id="1a88aae8-777a-4088-bcd2-06e36366fa1d" variableName="fxRates" />
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="Build digest" doc:id="842a7166-762e-4679-a0df-3aeadbb5a8b1" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="digest" ><![CDATA[%dw 2.0
+import round2, toEur, rateFor from modules::Fx
+output application/json
+
+var enriched = (vars.rows default []) map (row) -> {
+    country_code: row.country_code,
+    country_name: (vars.countryLookup[row.country_code].name) default row.country_code,
+    region: (vars.countryLookup[row.country_code].region) default "UNKNOWN",
+    currency: row.currency,
+    fx_rate: rateFor(row.currency, vars.fxRates),
+    amount_eur: toEur(row.amount_local as Number, rateFor(row.currency, vars.fxRates)),
+    sale_date: row.sale_date[0 to 9] as Date {format: "yyyy-MM-dd"}
+}
+var dates = enriched map $.sale_date
+---
+{
+    generated_at: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss"},
+    period_start: if (isEmpty(dates)) null else min(dates) as String {format: "yyyy-MM-dd"},
+    period_end: if (isEmpty(dates)) null else max(dates) as String {format: "yyyy-MM-dd"},
+    total_sales_count: sizeOf(enriched),
+    total_amount_eur: round2(sum (enriched map $.amount_eur)),
+    by_country: (enriched groupBy $.country_code) pluck ((rows, code) -> {
+        country_code: code,
+        country_name: rows[0].country_name,
+        region: rows[0].region,
+        sales_count: sizeOf(rows),
+        amount_eur: round2(sum(rows map $.amount_eur))
+    }),
+    by_currency: (enriched groupBy $.currency) pluck ((rows, cur) -> {
+        currency: cur,
+        sales_count: sizeOf(rows),
+        amount_eur: round2(sum (rows map $.amount_eur)),
+        fx_rate: rows[0].fx_rate
+    })
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="INFO" doc:name="Log summary" doc:id="5760e0ca-82a1-4631-a39c-26a66fc7be20" message='#[output text/plain&#10;---&#10;"Digest built: rows_read=" ++ &#10;(vars.rowsRead default 0) ++ &#10;" valid=" ++ &#10;sizeOf(vars.rows default []) ++ &#10;" invalid=" ++ ((vars.rowsRead default 0) - sizeOf(vars.rows default []))]' />
+		<until-successful maxRetries="${http.retry.count}" doc:name="Retry with backoff" doc:id="9c46ee6e-ff5a-4b49-baa5-8223c9c03941" millisBetweenRetries="${http.retry.delayMs}" >
+			<http:request method="POST" doc:name="POST digest to Treasury" doc:id="9b7bf81b-8e4b-406a-92e7-a22704c1aaa1" config-ref="Treasury_HTTP_Request_configuration" path="${treasury.path}" responseTimeout="${http.response.timeout}" >
+				<http:body ><![CDATA[#[vars.digest]]]></http:body>
+				<http:headers ><![CDATA[#[{ "Content-Type": "application/json" }]]]></http:headers>
+			</http:request>
+		</until-successful>
+		<logger level="INFO" doc:name="Log run finished" doc:id="873b1fd4-5d91-4038-8e89-5109b534e358" message='#[output text/plain&#10;---&#10;"Sales digest run finished: sent total_sales_count=" ++ &#10;(vars.digest.total_sales_count default 0) ++ &#10;" total_amount_eur=" &#10;++ (vars.digest.total_amount_eur default 0)]' />
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="false" doc:name="Log and skip cycle" doc:id="d5b5c07f-c39c-44be-93fd-593dff89abb2" >
+				<logger level="ERROR" doc:name="Log error context" doc:id="0c6e0694-dc69-4219-ab29-aed0a7b6c559" message='#["Sales digest run failed: type=" ++ (error.errorType.identifier default "UNKNOWN") ++ " reason=" ++ (error.description default "n/a")]' />
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<sub-flow name="country-data-pagination-sub-flow" doc:id="fa82a594-1090-42ba-a5a4-d5f2c939b417" >
+		<logger level="INFO" doc:name="Log cache miss" message="Country cache miss - loading reference from REST Countries" />
+		<until-successful maxRetries="${http.retry.count}" doc:name="Retry with backoff" millisBetweenRetries="${http.retry.delayMs}">
+			<http:request method="GET" doc:name="GET country reference data" config-ref="RestCountries_HTTP_Request_configuration" path="${countries.path}" responseTimeout="${http.response.timeout}">
+				<http:headers><![CDATA[#[{ Authorization: "Bearer " ++ p("secure::countries.apiKey") }]]]></http:headers>
+				<http:query-params><![CDATA[#[{ limit: "100", offset: "0", response_fields: "names.common,codes.alpha_2,region" }]]]></http:query-params>
+			</http:request>
+		</until-successful>
+		<set-variable variableName="countries" value="#[payload.data.objects default []]" doc:name="First page" />
+		<set-variable variableName="countryPages" doc:name="Remaining offsets" value="#[%dw 2.0&#10;output application/java&#10;var pages = ceil((payload.data.meta.total default 0) / 100.0)&#10;---&#10;if (pages &gt; 1) ((1 to (pages - 1)) map ($ * 100)) else []]" />
+		<foreach collection="#[vars.countryPages]" doc:name="For each extra page">
+				<set-variable variableName="pageOffset" value="#[payload as String]" doc:name="Offset" />
+			<until-successful maxRetries="${http.retry.count}" doc:name="Retry with backoff" millisBetweenRetries="${http.retry.delayMs}">
+				<http:request method="GET" doc:name="GET country page" config-ref="RestCountries_HTTP_Request_configuration" path="${countries.path}" responseTimeout="${http.response.timeout}">
+					<http:headers><![CDATA[#[{ Authorization: "Bearer " ++ p("secure::countries.apiKey") }]]]></http:headers>
+					<http:query-params><![CDATA[#[{ limit: "100", offset: vars.pageOffset, response_fields: "names.common,codes.alpha_2,region" }]]]></http:query-params>
+				</http:request>
+			</until-successful>
+			<set-variable variableName="countries" value="#[vars.countries ++ (payload.data.objects default [])]" doc:name="Append page" />
+		</foreach>
+		<set-variable variableName="countryLookup" doc:name="Index by alpha_2" value="#[%dw 2.0&#10;output application/java&#10;---&#10;(vars.countries default [])&#10;    filter (($.codes.alpha_2 default '') != '')&#10;    reduce (c, acc = {}) -&gt; acc ++ { (c.codes.alpha_2): { name: c.names.common, region: c.region } }]" />
+		<os:store key="countryLookup" objectStore="Country_Cache_OS" doc:name="Cache country lookup">
+					<os:value><![CDATA[#[vars.countryLookup]]]></os:value>
+				</os:store>
+	</sub-flow>
+</mule>

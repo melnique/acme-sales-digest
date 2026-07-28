@@ -1,12 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xmlns="http://www.mulesoft.org/schema/mule/core"
-	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
-http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
 	<configuration-properties doc:name="Configuration properties" doc:id="74aef59e-c4bd-4f15-adea-6ccef0d02098" file="properties/${mule.env}-properties.yaml" />
 	<configuration-properties doc:name="Configuration properties" doc:id="d42ffbbd-bd34-4702-9d47-cd2b1b35ef4b" file="properties/common-properties.yaml" />
 	<global-property doc:name="Global Property" doc:id="a245b26a-10b5-464f-9043-16f32a0cc14a" name="mule.env" value="${mule.env}" />
 	<global-property doc:name="Global Property" doc:id="3623b2f5-482e-4f11-a37c-405f2e27f60c" name="mule.vault.key" value="${mule.vault.key}" />
-	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="9e5893fc-54e6-4567-b43c-d53247289e0c" file="properties/${mule.env}-properties-enc.yaml" key="${mule.vault.key}" />
+	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="9e5893fc-54e6-4567-b43c-d53247289e0c" file="properties/${mule.env}-properties.yaml" key="${mule.vault.key}" />
+	<http:request-config name="RestCountries_HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="597f06f8-d1a1-4d8d-9c69-234ed9a268cb" >
+		<http:request-connection protocol="HTTPS" host="${countries.host}" />
+	</http:request-config>
+	<http:request-config name="Frankfurter_HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="6ec749f4-355f-4557-8d38-a82aaa519fe3" >
+		<http:request-connection protocol="HTTPS" host="${frankfurter.host}" />
+	</http:request-config>
+	<http:request-config name="Treasury_HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="9b854ce7-e4ad-4635-a122-9a80805bb69b" >
+		<http:request-connection protocol="HTTPS" host="${treasury.host}" />
+	</http:request-config>
+	<file:config name="File_Config" doc:name="File Config" doc:id="834ed636-51b5-448d-a7ca-bb67fadd4fab" >
+		<file:connection workingDir="${file.working.dir}" />
+	</file:config>
+	<os:object-store name="Country_Cache_OS" doc:name="Country cache"
+		persistent="true"
+		entryTtl="${countries.cache.ttlHours}" entryTtlUnit="HOURS"
+		expirationInterval="1" expirationIntervalUnit="HOURS" />
 </mule>
