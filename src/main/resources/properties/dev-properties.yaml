@@ -1,9 +1,9 @@
 scheduler:
-  frequency: "10"
+  frequency: "1"
 
 file:
   working:
-    dir: "/Users/ilya/AnypointStudio/nuvolar-workspace/sales-digest-app/input"
+    dir: "input"
     
 countries:
   host: "api.restcountries.com"
