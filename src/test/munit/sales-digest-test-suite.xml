@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="sales-digest-test-suite.xml">
+		<munit:parameterizations />
+	</munit:config>
+
+	<munit:test name="process-sales-batch-happy-path"
+		description="Validate, enrich (country + FX), aggregate and publish a clean batch">
+		<munit:behavior>
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock country cache (miss)">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Try country cache" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{}]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock country page">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET country reference data" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://mocks/countries-v5-es-gb.json', 'application/json')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Frankfurter">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET FX rate" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://mocks/frankfurter-eur.json', 'application/json')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Treasury">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="POST digest to Treasury" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" />
+					<munit-tools:attributes value="#[{ statusCode: 200 }]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-payload value="#[readUrl('classpath://sample/sample-sales.csv', 'application/csv')]" doc:name="Load sample batch" />
+			<flow-ref name="process-sales-batch-flow" doc:name="process-sales-batch-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.digest.total_sales_count]"
+				is="#[MunitTools::equalTo(3)]" message="Dirty row dropped, 3 valid rows expected" />
+			<munit-tools:assert-that expression="#[vars.digest.total_amount_eur]"
+				is="#[MunitTools::equalTo(242.0)]" message="100 + 50 EUR + (80 GBP * 1.15) = 242.00" />
+			<munit-tools:assert-that expression="#[(vars.digest.by_currency filter ($.currency == 'GBP'))[0].fx_rate]"
+				is="#[MunitTools::equalTo(1.15)]" message="GBP rate must be inverted from the EUR-based Frankfurter response" />
+
+			<munit-tools:verify-call processor="http:request" times="1" doc:name="Treasury called once">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="POST digest to Treasury" />
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="http:request" times="0" doc:name="No extra country page (total fits one page)">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET country page" />
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="process-sales-batch-unknown-country"
+		description="Unknown country degrades gracefully; FX skipped when all-EUR">
+		<munit:behavior>
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock country cache (miss)">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Try country cache" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{}]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock country page">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET country reference data" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://mocks/countries-v5-es.json', 'application/json')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Treasury">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="POST digest to Treasury" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" />
+					<munit-tools:attributes value="#[{ statusCode: 200 }]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-payload value='#[%dw 2.0&#10;output application/java&#10;---&#10;[&#10;  { sale_id: "1", sale_date: "2026-01-05", country_code: "ES", currency: "EUR", amount_local: "100.00", customer_email: "a@example.es" },&#10;  { sale_id: "2", sale_date: "2026-01-06", country_code: "XX", currency: "EUR", amount_local: "30.00", customer_email: "x@example.com" }&#10;]]' doc:name="Batch with unknown code" />
+			<flow-ref name="process-sales-batch-flow" doc:name="process-sales-batch-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.digest.total_sales_count]"
+				is="#[MunitTools::equalTo(2)]" message="Both rows kept" />
+			<munit-tools:assert-that expression="#[(vars.digest.by_country filter ($.country_code == 'XX'))[0].region]"
+				is="#[MunitTools::equalTo('UNKNOWN')]" message="Unknown code falls back to UNKNOWN region" />
+			<munit-tools:verify-call processor="http:request" times="0" doc:name="FX never called">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET FX rate" />
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="http:request" times="1" doc:name="Treasury called once">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="POST digest to Treasury" />
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="scheduler-flow-reads-file-and-processes"
+		description="Scheduler flow reads the file and delegates to the processing flow">
+		<munit:behavior>
+			<munit-tools:mock-when processor="file:read" doc:name="Mock file read">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Read sales.csv" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[readUrl('classpath://sample/sample-sales.csv', 'application/csv')]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock country cache (miss)">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Try country cache" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{}]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock country page">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET country reference data" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://mocks/countries-v5-es-gb.json', 'application/json')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Frankfurter">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="GET FX rate" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://mocks/frankfurter-eur.json', 'application/json')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Treasury">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="POST digest to Treasury" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" />
+					<munit-tools:attributes value="#[{ statusCode: 200 }]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<flow-ref name="sales-digest-scheduler-flow" doc:name="sales-digest-scheduler-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.digest.total_sales_count]"
+				is="#[MunitTools::equalTo(3)]" message="File read and processed via the scheduler flow" />
+			<munit-tools:verify-call processor="file:read" times="1" doc:name="File read once">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Read sales.csv" />
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+</mule>

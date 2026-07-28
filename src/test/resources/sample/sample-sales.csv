@@ -1,0 +1,5 @@
+sale_id,sale_date,country_code,currency,amount_local,customer_email
+9001,2026-01-05,ES,EUR,100.00,a@example.es
+9002,2026-01-06,GB,GBP,80.00,b@example.co.uk
+9003,2026-01-07,ES,EUR,50.00,c@example.es
+9004,2026-01-08,GB,GBP,bad,d@example.co.uk

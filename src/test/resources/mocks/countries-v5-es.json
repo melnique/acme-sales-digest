@@ -1,0 +1,8 @@
+{
+  "data": {
+    "objects": [
+      { "names": { "common": "Spain" }, "codes": { "alpha_2": "ES" }, "region": "Europe" }
+    ],
+    "meta": { "total": 1, "count": 1, "limit": 100, "offset": 0, "more": false }
+  }
+}

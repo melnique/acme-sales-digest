@@ -1,0 +1,20 @@
+scheduler:
+  frequency: "3600"
+
+file:
+  working:
+    dir: "input"
+    
+countries:
+  host: "api.restcountries.com"
+  path: "/countries/v5"
+  apiKey: "![VOu4WSjGHsLICrgKes3Jx9ddF/s2qH1gtNUKjw5nXPSfmM7ZPR56S+4stwRN3ONd]"
+
+frankfurter:
+  host: "api.frankfurter.dev"
+  path: "/v1/latest"
+
+treasury:
+  host: "httpbin.org"
+  path: "/post"
+  

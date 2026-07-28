@@ -1,0 +1,13 @@
+file:
+  name: "sales.csv"
+
+countries:
+  cache:
+    ttlHours: "24"
+
+http:
+  response:
+    timeout: "10000"
+  retry:
+    count: "3"
+    delayMs: "2000"
